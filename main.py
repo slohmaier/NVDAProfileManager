@@ -79,27 +79,17 @@ class NVDAProfileManager(wx.Frame):
             wx.MessageBox(f'NVDA folder not found at {self.nvda_path}', 'Error', wx.OK | wx.ICON_ERROR)
             return
 
-        # Load current NVDA profile info and display it
-        self.load_current_nvda_profile()
+        # Create temporary .nvdaprofile
+        temp_dir = tempfile.gettempdir()
+        temp_profile_path = os.path.join(temp_dir, 'temp_nvda_profile.nvdaprofile')
 
-        # Ask where to save
-        wildcard = "NVDA Profile files (*.nvdaprofile)|*.nvdaprofile"
-        dlg = wx.FileDialog(self, "Save NVDA Profile",
-                           defaultDir=os.path.expanduser("~"),
-                           wildcard=wildcard,
-                           style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT)
+        # Create the profile backup in temp directory
+        self.create_profile_backup(temp_profile_path)
 
-        if dlg.ShowModal() == wx.ID_OK:
-            path = dlg.GetPath()
-            if not path.endswith('.nvdaprofile'):
-                path += '.nvdaprofile'
-
-            self.create_profile_backup(path)
-            self.current_profile_path = path
-            self.load_profile_info(path)
-            self.SetStatusText(f'Created profile: {os.path.basename(path)}')
-
-        dlg.Destroy()
+        # Set current profile to temp file and load it
+        self.current_profile_path = temp_profile_path
+        self.load_profile_info(temp_profile_path)
+        self.SetStatusText('New profile created (unsaved)')
 
     def on_open(self, event):
         """Open an existing NVDA profile"""
@@ -119,15 +109,53 @@ class NVDAProfileManager(wx.Frame):
 
     def on_save(self, event):
         """Save current profile"""
-        if self.current_profile_path:
-            self.create_profile_backup(self.current_profile_path)
-            self.SetStatusText(f'Saved profile: {os.path.basename(self.current_profile_path)}')
-        else:
+        if not self.current_profile_path:
+            wx.MessageBox('No profile to save', 'Error', wx.OK | wx.ICON_ERROR)
+            return
+
+        # Check if it's a temp file (unsaved)
+        temp_dir = tempfile.gettempdir()
+        if self.current_profile_path.startswith(temp_dir):
+            # Temp file, need to use Save As
             self.on_save_as(event)
+        else:
+            # Already saved, just update the file
+            self.create_profile_backup(self.current_profile_path)
+            self.load_profile_info(self.current_profile_path)
+            self.SetStatusText(f'Saved profile: {os.path.basename(self.current_profile_path)}')
 
     def on_save_as(self, event):
         """Save profile as new file"""
-        self.on_create_new(event)
+        if not self.current_profile_path:
+            wx.MessageBox('No profile to save', 'Error', wx.OK | wx.ICON_ERROR)
+            return
+
+        # Ask where to save
+        wildcard = "NVDA Profile files (*.nvdaprofile)|*.nvdaprofile"
+        dlg = wx.FileDialog(self, "Save NVDA Profile As",
+                           defaultDir=os.path.expanduser("~"),
+                           wildcard=wildcard,
+                           style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT)
+
+        if dlg.ShowModal() == wx.ID_OK:
+            path = dlg.GetPath()
+            if not path.endswith('.nvdaprofile'):
+                path += '.nvdaprofile'
+
+            # Copy temp file to new location or create new backup
+            temp_dir = tempfile.gettempdir()
+            if self.current_profile_path.startswith(temp_dir):
+                # Copy temp file to permanent location
+                shutil.copy2(self.current_profile_path, path)
+            else:
+                # Create new backup from current NVDA folder
+                self.create_profile_backup(path)
+
+            self.current_profile_path = path
+            self.load_profile_info(path)
+            self.SetStatusText(f'Saved profile: {os.path.basename(path)}')
+
+        dlg.Destroy()
 
     def on_restore(self, event):
         """Restore NVDA profile from backup"""
@@ -158,7 +186,7 @@ class NVDAProfileManager(wx.Frame):
         """Exit application"""
         self.Close(True)
 
-    def create_profile_backup(self, output_path):
+    def create_profile_backup(self, output_path, show_success=False):
         """Create a backup of the NVDA profile"""
         self.SetStatusText('Creating backup...')
 
@@ -183,11 +211,13 @@ class NVDAProfileManager(wx.Frame):
                         arcname = os.path.relpath(file_path, self.nvda_path)
                         zipf.write(file_path, arcname)
 
-            wx.MessageBox(f'Profile backup created successfully!', 'Success', wx.OK | wx.ICON_INFORMATION)
+            if show_success:
+                wx.MessageBox(f'Profile backup created successfully!', 'Success', wx.OK | wx.ICON_INFORMATION)
 
         except Exception as e:
             wx.MessageBox(f'Error creating backup: {str(e)}', 'Error', wx.OK | wx.ICON_ERROR)
             self.SetStatusText('Error creating backup')
+            raise
 
     def restore_profile(self, profile_path):
         """Restore NVDA profile from backup"""
