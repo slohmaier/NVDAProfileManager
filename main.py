@@ -79,6 +79,9 @@ class NVDAProfileManager(wx.Frame):
             wx.MessageBox(f'NVDA folder not found at {self.nvda_path}', 'Error', wx.OK | wx.ICON_ERROR)
             return
 
+        # Load current NVDA profile info and display it
+        self.load_current_nvda_profile()
+
         # Ask where to save
         wildcard = "NVDA Profile files (*.nvdaprofile)|*.nvdaprofile"
         dlg = wx.FileDialog(self, "Save NVDA Profile",
@@ -256,6 +259,59 @@ class NVDAProfileManager(wx.Frame):
                 item = self.tree.AppendItem(parent, name)
                 if subitems:
                     self.add_tree_items(item, subitems)
+
+    def load_current_nvda_profile(self):
+        """Load and display current NVDA profile from disk"""
+        try:
+            # Create descriptor for current profile
+            descriptor = {
+                'username': os.getenv('USERNAME'),
+                'computer_name': os.getenv('COMPUTERNAME'),
+                'created_date': datetime.now().isoformat(),
+                'nvda_path': self.nvda_path
+            }
+
+            # Display info
+            info = f"Username: {descriptor.get('username', 'N/A')}\n"
+            info += f"Computer: {descriptor.get('computer_name', 'N/A')}\n"
+            info += f"Created: {descriptor.get('created_date', 'N/A')}\n"
+            info += f"Original Path: {descriptor.get('nvda_path', 'N/A')}"
+
+            self.info_text.SetValue(info)
+
+            # Populate tree with current NVDA folder contents
+            self.tree.DeleteAllItems()
+            root = self.tree.AddRoot('Profile')
+
+            # Build tree structure from filesystem
+            file_dict = {}
+            for root_dir, dirs, files in os.walk(self.nvda_path):
+                # Get relative path
+                rel_path = os.path.relpath(root_dir, self.nvda_path)
+
+                # Build nested dictionary structure
+                if rel_path == '.':
+                    current_dict = file_dict
+                else:
+                    parts = rel_path.split(os.sep)
+                    current_dict = file_dict
+                    for part in parts:
+                        if part not in current_dict:
+                            current_dict[part] = {}
+                        current_dict = current_dict[part]
+
+                # Add files to current level
+                for file in files:
+                    current_dict[file] = {}
+
+            # Add items to tree
+            self.add_tree_items(root, file_dict)
+            self.tree.Expand(root)
+
+            self.SetStatusText('Loaded current NVDA profile')
+
+        except Exception as e:
+            wx.MessageBox(f'Error loading current profile: {str(e)}', 'Error', wx.OK | wx.ICON_ERROR)
 
 
 def main():
