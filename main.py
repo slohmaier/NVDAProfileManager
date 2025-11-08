@@ -277,7 +277,6 @@ class NVDAProfileManager(wx.Frame):
 
                 # Add items to tree
                 self.add_tree_items(root, file_dict)
-                self.tree.Expand(root)
 
         except Exception as e:
             wx.MessageBox(f'Error loading profile: {str(e)}', 'Error', wx.OK | wx.ICON_ERROR)
@@ -336,7 +335,6 @@ class NVDAProfileManager(wx.Frame):
 
             # Add items to tree
             self.add_tree_items(root, file_dict)
-            self.tree.Expand(root)
 
             self.SetStatusText('Loaded current NVDA profile')
 
