@@ -1,5 +1,6 @@
 import wx
 import os
+import sys
 import json
 import zipfile
 import shutil
@@ -7,17 +8,53 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
+import nvda_utils
+
 
 class NVDAProfileManager(wx.Frame):
-    def __init__(self):
+    def __init__(self, profile_path=None):
         super().__init__(parent=None, title='NVDA Profile Manager', size=(800, 600))
 
         self.current_profile_path = None
         self.nvda_path = os.path.join(os.getenv('APPDATA'), 'nvda')
 
         self.init_ui()
+        self._set_icon()
         self.Centre()
         self.Show()
+
+        # Load profile if passed via command line
+        if profile_path and os.path.exists(profile_path):
+            self.current_profile_path = profile_path
+            self.load_profile_info(profile_path)
+            self.SetStatusText(f'Opened profile: {os.path.basename(profile_path)}')
+
+    def _set_icon(self):
+        """Set the application window icon."""
+        # Try to load icon from various locations
+        icon_paths = []
+
+        # When running as PyInstaller exe, use the embedded icon
+        if getattr(sys, 'frozen', False):
+            # Running as compiled exe
+            exe_dir = os.path.dirname(sys.executable)
+            icon_paths.append(os.path.join(exe_dir, 'icon.ico'))
+            # The exe itself can be used as icon source on Windows
+            icon_paths.append(sys.executable)
+        else:
+            # Running from source
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            icon_paths.append(os.path.join(script_dir, 'icon.ico'))
+
+        for icon_path in icon_paths:
+            if os.path.exists(icon_path):
+                try:
+                    icon = wx.Icon(icon_path, wx.BITMAP_TYPE_ICO)
+                    if icon.IsOk():
+                        self.SetIcon(icon)
+                        return
+                except Exception:
+                    pass
 
     def init_ui(self):
         # Create menu bar
@@ -163,6 +200,49 @@ class NVDAProfileManager(wx.Frame):
             wx.MessageBox('Please open a profile first', 'Error', wx.OK | wx.ICON_ERROR)
             return
 
+        # Check if any files are locked in NVDA folder
+        can_delete, locked_files = nvda_utils.check_folder_deletable(self.nvda_path)
+
+        if not can_delete:
+            # Files are locked, check if NVDA is running
+            if nvda_utils.is_nvda_running():
+                dlg = wx.MessageDialog(
+                    self,
+                    'NVDA is currently running and must be closed before restoring.\n\n'
+                    'Close NVDA now?',
+                    'NVDA Running',
+                    wx.YES_NO | wx.ICON_WARNING
+                )
+                if dlg.ShowModal() == wx.ID_YES:
+                    self.SetStatusText('Closing NVDA...')
+                    if not nvda_utils.stop_nvda():
+                        wx.MessageBox(
+                            'Could not close NVDA. Please close it manually and try again.',
+                            'Error',
+                            wx.OK | wx.ICON_ERROR
+                        )
+                        dlg.Destroy()
+                        return
+                    # Recheck if files are now unlocked
+                    can_delete, locked_files = nvda_utils.check_folder_deletable(self.nvda_path)
+                else:
+                    dlg.Destroy()
+                    return
+                dlg.Destroy()
+
+            # If files are still locked after closing NVDA
+            if not can_delete:
+                locked_list = '\n'.join(locked_files[:10])
+                if len(locked_files) > 10:
+                    locked_list += f'\n... and {len(locked_files) - 10} more files'
+                wx.MessageBox(
+                    f'The following files are locked by another process:\n\n{locked_list}\n\n'
+                    'Please close any programs accessing these files and try again.',
+                    'Files Locked',
+                    wx.OK | wx.ICON_ERROR
+                )
+                return
+
         # Confirm restore
         dlg = wx.MessageDialog(self,
                               f'This will DELETE the current NVDA folder at:\n{self.nvda_path}\n\n'
@@ -174,9 +254,26 @@ class NVDAProfileManager(wx.Frame):
         if dlg.ShowModal() == wx.ID_YES:
             try:
                 self.restore_profile(self.current_profile_path)
-                wx.MessageBox('Profile restored successfully!\n\nPlease restart NVDA.',
-                            'Success', wx.OK | wx.ICON_INFORMATION)
                 self.SetStatusText('Profile restored successfully')
+
+                # Ask if user wants to restart NVDA
+                restart_dlg = wx.MessageDialog(
+                    self,
+                    'Profile restored successfully!\n\nWould you like to start NVDA now?',
+                    'Restore Complete',
+                    wx.YES_NO | wx.ICON_QUESTION
+                )
+                if restart_dlg.ShowModal() == wx.ID_YES:
+                    if nvda_utils.start_nvda():
+                        self.SetStatusText('Profile restored - NVDA started')
+                    else:
+                        wx.MessageBox(
+                            'Could not start NVDA. Please start it manually.',
+                            'Warning',
+                            wx.OK | wx.ICON_WARNING
+                        )
+                restart_dlg.Destroy()
+
             except Exception as e:
                 wx.MessageBox(f'Error restoring profile: {str(e)}', 'Error', wx.OK | wx.ICON_ERROR)
 
@@ -344,7 +441,15 @@ class NVDAProfileManager(wx.Frame):
 
 def main():
     app = wx.App()
-    NVDAProfileManager()
+
+    # Check for command-line argument (file association)
+    profile_path = None
+    if len(sys.argv) > 1:
+        arg_path = sys.argv[1]
+        if os.path.exists(arg_path) and arg_path.endswith('.nvdaprofile'):
+            profile_path = arg_path
+
+    NVDAProfileManager(profile_path=profile_path)
     app.MainLoop()
 
 

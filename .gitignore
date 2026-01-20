@@ -40,3 +40,12 @@ Thumbs.db
 # Test NVDA profiles
 *.nvdaprofile
 test_profiles/
+
+# SCons / PyInstaller build artifacts
+*.spec
+run_marker
+icon_preview.png
+.sconsign.dblite
+
+# Claude Code local settings
+.claude/

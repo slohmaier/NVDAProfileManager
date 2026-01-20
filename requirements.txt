@@ -1,1 +1,5 @@
 wxPython>=4.2.0
+psutil>=5.9.0
+Pillow>=10.0.0
+pyinstaller>=6.0.0
+scons>=4.5.0
