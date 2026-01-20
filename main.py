@@ -72,6 +72,12 @@ class NVDAProfileManager(wx.Frame):
         exit_item = file_menu.Append(wx.ID_EXIT, 'E&xit\tCtrl+Q', 'Exit application')
 
         menubar.Append(file_menu, '&File')
+
+        # Tools menu
+        tools_menu = wx.Menu()
+        register_item = tools_menu.Append(wx.ID_ANY, 'Register File &Type...', 'Associate .nvdaprofile files with this application')
+        menubar.Append(tools_menu, '&Tools')
+
         self.SetMenuBar(menubar)
 
         # Bind menu events
@@ -81,6 +87,7 @@ class NVDAProfileManager(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_save_as, save_as_item)
         self.Bind(wx.EVT_MENU, self.on_restore, restore_item)
         self.Bind(wx.EVT_MENU, self.on_exit, exit_item)
+        self.Bind(wx.EVT_MENU, self.on_register_filetype, register_item)
 
         # Create main panel
         panel = wx.Panel(self)
@@ -282,6 +289,49 @@ class NVDAProfileManager(wx.Frame):
     def on_exit(self, event):
         """Exit application"""
         self.Close(True)
+
+    def on_register_filetype(self, event):
+        """Register .nvdaprofile file type association"""
+        is_registered, location = nvda_utils.is_filetype_registered()
+
+        if is_registered:
+            loc_text = "current user" if location == "user" else "system-wide"
+            dlg = wx.MessageDialog(
+                self,
+                f'File type .nvdaprofile is already registered ({loc_text}).\n\n'
+                'Would you like to unregister it?',
+                'File Type Already Registered',
+                wx.YES_NO | wx.ICON_QUESTION
+            )
+            if dlg.ShowModal() == wx.ID_YES:
+                use_hkcu = location == "user"
+                success, message = nvda_utils.unregister_filetype(use_hkcu=use_hkcu)
+                if success:
+                    wx.MessageBox(message, 'Success', wx.OK | wx.ICON_INFORMATION)
+                else:
+                    wx.MessageBox(message, 'Error', wx.OK | wx.ICON_ERROR)
+            dlg.Destroy()
+            return
+
+        # Choose registration type
+        dlg = wx.SingleChoiceDialog(
+            self,
+            'Choose registration scope:\n\n'
+            '- Current User: No admin required, only affects your account\n'
+            '- System-wide: Requires admin, affects all users',
+            'Register File Type',
+            ['Current User (Recommended)', 'System-wide (Requires Admin)']
+        )
+
+        if dlg.ShowModal() == wx.ID_OK:
+            use_hkcu = dlg.GetSelection() == 0
+            success, message = nvda_utils.register_filetype(use_hkcu=use_hkcu)
+            if success:
+                wx.MessageBox(message, 'Success', wx.OK | wx.ICON_INFORMATION)
+            else:
+                wx.MessageBox(message, 'Error', wx.OK | wx.ICON_ERROR)
+
+        dlg.Destroy()
 
     def create_profile_backup(self, output_path, show_success=False):
         """Create a backup of the NVDA profile"""

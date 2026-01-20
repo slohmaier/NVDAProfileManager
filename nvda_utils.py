@@ -2,8 +2,10 @@
 
 import os
 import subprocess
+import sys
 import time
-from typing import List, Optional
+import winreg
+from typing import List, Optional, Tuple
 
 try:
     import psutil
@@ -162,3 +164,147 @@ def check_folder_deletable(folder_path: str) -> tuple[bool, List[str]]:
     """
     locked = check_files_locked(folder_path)
     return len(locked) == 0, locked
+
+
+def get_executable_path() -> str:
+    """Get the path to the current executable or script."""
+    if getattr(sys, 'frozen', False):
+        return sys.executable
+    else:
+        return os.path.abspath(sys.argv[0])
+
+
+def is_admin() -> bool:
+    """Check if the current process has administrator privileges."""
+    try:
+        import ctypes
+        return ctypes.windll.shell32.IsUserAnAdmin() != 0
+    except Exception:
+        return False
+
+
+def register_filetype(use_hkcu: bool = False) -> Tuple[bool, str]:
+    """Register .nvdaprofile file type association.
+
+    Args:
+        use_hkcu: If True, register under HKEY_CURRENT_USER (no admin needed).
+                  If False, register under HKEY_CLASSES_ROOT (requires admin).
+
+    Returns:
+        Tuple of (success, message)
+    """
+    exe_path = get_executable_path()
+
+    if not getattr(sys, 'frozen', False):
+        return False, "File type registration requires the compiled executable.\nPlease run 'scons build' first."
+
+    if not os.path.exists(exe_path):
+        return False, f"Executable not found at: {exe_path}"
+
+    try:
+        if use_hkcu:
+            root_key = winreg.HKEY_CURRENT_USER
+            base_path = r"Software\Classes"
+        else:
+            if not is_admin():
+                return False, "Administrator privileges required for system-wide registration."
+            root_key = winreg.HKEY_CLASSES_ROOT
+            base_path = ""
+
+        ext_path = f"{base_path}\\.nvdaprofile" if base_path else ".nvdaprofile"
+        type_path = f"{base_path}\\NVDAProfile" if base_path else "NVDAProfile"
+
+        # Register file extension
+        with winreg.CreateKey(root_key, ext_path) as key:
+            winreg.SetValueEx(key, "", 0, winreg.REG_SZ, "NVDAProfile")
+
+        # Register file type
+        with winreg.CreateKey(root_key, type_path) as key:
+            winreg.SetValueEx(key, "", 0, winreg.REG_SZ, "NVDA Profile Backup")
+
+        # Set icon
+        with winreg.CreateKey(root_key, f"{type_path}\\DefaultIcon") as key:
+            winreg.SetValueEx(key, "", 0, winreg.REG_SZ, f'"{exe_path}",0')
+
+        # Set open command
+        with winreg.CreateKey(root_key, f"{type_path}\\shell\\open\\command") as key:
+            winreg.SetValueEx(key, "", 0, winreg.REG_SZ, f'"{exe_path}" "%1"')
+
+        location = "current user" if use_hkcu else "system-wide"
+        return True, f"File type registered successfully ({location}).\n\nYou may need to restart Explorer or log out/in for changes to take effect."
+
+    except PermissionError:
+        return False, "Permission denied. Try running as administrator for system-wide registration."
+    except Exception as e:
+        return False, f"Failed to register file type: {str(e)}"
+
+
+def unregister_filetype(use_hkcu: bool = False) -> Tuple[bool, str]:
+    """Remove .nvdaprofile file type association.
+
+    Args:
+        use_hkcu: If True, remove from HKEY_CURRENT_USER.
+                  If False, remove from HKEY_CLASSES_ROOT (requires admin).
+
+    Returns:
+        Tuple of (success, message)
+    """
+    try:
+        if use_hkcu:
+            root_key = winreg.HKEY_CURRENT_USER
+            base_path = r"Software\Classes"
+        else:
+            if not is_admin():
+                return False, "Administrator privileges required for system-wide unregistration."
+            root_key = winreg.HKEY_CLASSES_ROOT
+            base_path = ""
+
+        ext_path = f"{base_path}\\.nvdaprofile" if base_path else ".nvdaprofile"
+        type_path = f"{base_path}\\NVDAProfile" if base_path else "NVDAProfile"
+
+        def delete_key_recursive(root, path):
+            try:
+                with winreg.OpenKey(root, path, 0, winreg.KEY_ALL_ACCESS) as key:
+                    while True:
+                        try:
+                            subkey = winreg.EnumKey(key, 0)
+                            delete_key_recursive(root, f"{path}\\{subkey}")
+                        except OSError:
+                            break
+                winreg.DeleteKey(root, path)
+            except FileNotFoundError:
+                pass
+
+        delete_key_recursive(root_key, ext_path)
+        delete_key_recursive(root_key, type_path)
+
+        location = "current user" if use_hkcu else "system-wide"
+        return True, f"File type unregistered successfully ({location})."
+
+    except PermissionError:
+        return False, "Permission denied. Try running as administrator."
+    except Exception as e:
+        return False, f"Failed to unregister file type: {str(e)}"
+
+
+def is_filetype_registered() -> Tuple[bool, str]:
+    """Check if .nvdaprofile file type is registered.
+
+    Returns:
+        Tuple of (is_registered, location) where location is 'user', 'system', or ''
+    """
+    # Check HKCU first
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Classes\.nvdaprofile"):
+            return True, "user"
+    except FileNotFoundError:
+        pass
+
+    # Check HKCR
+    try:
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, ".nvdaprofile"):
+            return True, "system"
+    except FileNotFoundError:
+        pass
+
+    return False, ""
