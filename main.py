@@ -1,19 +1,24 @@
 import wx
+import wx.adv
 import os
 import sys
 import json
 import zipfile
 import shutil
 import tempfile
+import webbrowser
 from datetime import datetime
 from pathlib import Path
 
 import nvda_utils
 
+VERSION = "1.0"
+GITHUB_URL = "https://github.com/slohmaier/NVDAProfileManager"
+
 
 class NVDAProfileManager(wx.Frame):
     def __init__(self, profile_path=None):
-        super().__init__(parent=None, title='NVDA Profile Manager', size=(800, 600))
+        super().__init__(parent=None, title=f'NVDA Profile Manager v{VERSION}', size=(800, 600))
 
         self.current_profile_path = None
         self.nvda_path = os.path.join(os.getenv('APPDATA'), 'nvda')
@@ -78,6 +83,13 @@ class NVDAProfileManager(wx.Frame):
         register_item = tools_menu.Append(wx.ID_ANY, 'Register File &Type...', 'Associate .nvdaprofile files with this application')
         menubar.Append(tools_menu, '&Tools')
 
+        # Help menu
+        help_menu = wx.Menu()
+        github_item = help_menu.Append(wx.ID_ANY, '&GitHub Repository', 'Open the GitHub repository in your browser')
+        help_menu.AppendSeparator()
+        about_item = help_menu.Append(wx.ID_ABOUT, '&About NVDA Profile Manager', 'About this application')
+        menubar.Append(help_menu, '&Help')
+
         self.SetMenuBar(menubar)
 
         # Bind menu events
@@ -88,6 +100,8 @@ class NVDAProfileManager(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_restore, restore_item)
         self.Bind(wx.EVT_MENU, self.on_exit, exit_item)
         self.Bind(wx.EVT_MENU, self.on_register_filetype, register_item)
+        self.Bind(wx.EVT_MENU, self.on_github, github_item)
+        self.Bind(wx.EVT_MENU, self.on_about, about_item)
 
         # Create main panel
         panel = wx.Panel(self)
@@ -332,6 +346,22 @@ class NVDAProfileManager(wx.Frame):
                 wx.MessageBox(message, 'Error', wx.OK | wx.ICON_ERROR)
 
         dlg.Destroy()
+
+    def on_github(self, event):
+        """Open GitHub repository in browser"""
+        webbrowser.open(GITHUB_URL)
+
+    def on_about(self, event):
+        """Show about dialog"""
+        info = wx.adv.AboutDialogInfo()
+        info.SetName('NVDA Profile Manager')
+        info.SetVersion(VERSION)
+        info.SetDescription('A tool to backup and restore NVDA screen reader profiles.\n\n'
+                           'Create backups of your NVDA configuration and restore them '
+                           'on the same or different computers.')
+        info.SetCopyright('(C) 2025 Stefan Lohmaier')
+        info.SetWebSite(GITHUB_URL, 'GitHub Repository')
+        wx.adv.AboutBox(info)
 
     def create_profile_backup(self, output_path, show_success=False):
         """Create a backup of the NVDA profile"""
