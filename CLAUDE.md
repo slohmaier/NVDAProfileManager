@@ -8,7 +8,10 @@ NVDA Profile Manager is a Python3 wxPython application that manages NVDA screen 
 
 ## Core Functionality
 
-- **Backup**: Creates `.nvdaprofile` files (ZIP archives) containing all NVDA configuration files and folders
+- **Backup**: Creates `.nvdaprofile` files (ZIP archives) containing all NVDA configuration files and
+  folders. The archive is built in a same-volume temp file and swapped in with an atomic
+  `os.replace`, so a failure midway never corrupts an existing backup at the destination
+  (`NVDAProfileManager.create_profile_backup`)
 - **Restore**: Replaces the NVDA folder from a `.nvdaprofile` backup atomically — the backup is
   staged, then swapped in, keeping the current folder until the swap succeeds so a failure rolls
   back (`nvda_utils.safe_restore`)
