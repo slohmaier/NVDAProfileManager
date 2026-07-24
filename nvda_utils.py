@@ -72,7 +72,7 @@ def get_nvda_process() -> Optional['psutil.Process']:
 
 
 def stop_nvda() -> bool:
-    """Gracefully stop NVDA using its quit command."""
+    """Gracefully stop NVDA using its quit command, escalating only if needed."""
     nvda_exe = find_nvda_executable()
 
     if nvda_exe:
@@ -83,7 +83,14 @@ def stop_nvda() -> bool:
         except Exception:
             pass
 
-    # Also try via process if we have psutil
+    # Give the graceful quit a chance to finish before escalating. Terminating
+    # immediately after '-q' would race NVDA's own shutdown and cut it off
+    # mid-way (`nvda -q` returns as soon as it has *signalled* the quit, not
+    # when NVDA has actually exited).
+    if wait_for_nvda_exit():
+        return True
+
+    # Still running — force it down as a last resort.
     if psutil is not None:
         proc = get_nvda_process()
         if proc:
@@ -211,6 +218,31 @@ def safe_restore(nvda_path: str, profile_path: str,
     # 4. Success — discard the folder we set aside.
     if moved_aside:
         remove_tree(moved_aside)
+
+
+def cleanup_stale_restore_dirs(nvda_path: str) -> None:
+    """Remove rollback/staging folders left behind by an interrupted restore.
+
+    ``safe_restore`` keeps the previous configuration as ``<nvda>.bak-<timestamp>``
+    and extracts the new one into an ``nvda_restore_*`` staging directory. A crash
+    (or a kill) between the swap steps can orphan either of them next to the NVDA
+    folder. Once the process runs again the live folder is already in place, so
+    these leftovers are pure clutter and safe to delete. Called at startup.
+    """
+    parent = os.path.dirname(os.path.abspath(nvda_path))
+    base = os.path.basename(os.path.abspath(nvda_path))
+    if not os.path.isdir(parent):
+        return
+
+    for name in os.listdir(parent):
+        full = os.path.join(parent, name)
+        if not os.path.isdir(full):
+            continue
+        if name.startswith(f'{base}.bak-') or name.startswith('nvda_restore_'):
+            try:
+                remove_tree(full)
+            except OSError:
+                pass
 
 
 def get_executable_path() -> str:
