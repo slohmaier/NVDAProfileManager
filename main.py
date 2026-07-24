@@ -404,25 +404,13 @@ class NVDAProfileManager(wx.Frame):
             raise
 
     def restore_profile(self, profile_path):
-        """Restore NVDA profile from backup"""
+        """Restore NVDA profile from backup.
+
+        Delegates to nvda_utils.safe_restore, which stages the extraction and swaps
+        it in atomically, so a failure leaves the existing configuration intact.
+        """
         self.SetStatusText('Restoring profile...')
-
-        # Delete existing NVDA folder
-        if os.path.exists(self.nvda_path):
-            shutil.rmtree(self.nvda_path)
-
-        # Create NVDA folder
-        os.makedirs(self.nvda_path, exist_ok=True)
-
-        # Extract profile
-        with zipfile.ZipFile(profile_path, 'r') as zipf:
-            for member in zipf.namelist():
-                # Skip descriptor file
-                if member == 'profile_descriptor.json':
-                    continue
-
-                # Extract file
-                zipf.extract(member, self.nvda_path)
+        nvda_utils.safe_restore(self.nvda_path, profile_path)
 
     def load_profile_info(self, profile_path):
         """Load and display profile information"""

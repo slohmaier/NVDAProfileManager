@@ -5,8 +5,10 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import winreg
+import zipfile
 from typing import List, Optional, Tuple
 
 try:
@@ -151,6 +153,64 @@ def remove_tree(path: str) -> None:
             path,
             onerror=lambda func, p, exc_info: clear_readonly_and_retry(func, p, exc_info),
         )
+
+
+def safe_restore(nvda_path: str, profile_path: str,
+                 descriptor_name: str = 'profile_descriptor.json') -> None:
+    """Restore an NVDA profile without ever putting the live configuration at risk.
+
+    The old approach deleted the NVDA folder and *then* extracted the backup, so any
+    failure in between — a corrupt archive, a read-only file, a locked handle — left
+    the configuration destroyed and unrecoverable.
+
+    This does it the safe way:
+
+    1. Extract the backup into a staging folder on the same volume. A bad archive
+       fails here, before the live folder has been touched at all.
+    2. Move the current folder aside (a single, atomic directory rename that keeps it
+       intact as a rollback point).
+    3. Move the staged folder into place. If that fails, the previous folder is moved
+       back and nothing is lost.
+    4. Only once the swap has succeeded is the set-aside folder deleted.
+
+    Raises on failure, having left the existing configuration untouched (or restored).
+    """
+    parent = os.path.dirname(os.path.abspath(nvda_path))
+    os.makedirs(parent, exist_ok=True)
+
+    # 1. Extract to staging on the same volume (so the later rename is atomic).
+    staging = tempfile.mkdtemp(prefix='nvda_restore_', dir=parent)
+    try:
+        with zipfile.ZipFile(profile_path, 'r') as zipf:
+            corrupt = zipf.testzip()
+            if corrupt is not None:
+                raise RuntimeError(f'Backup archive is corrupt: {corrupt}')
+            for member in zipf.namelist():
+                if member == descriptor_name:
+                    continue
+                zipf.extract(member, staging)
+    except Exception:
+        remove_tree(staging)
+        raise
+
+    # 2. Move the current folder aside as a rollback point.
+    moved_aside = ''
+    if os.path.exists(nvda_path):
+        moved_aside = f'{nvda_path}.bak-{time.strftime("%Y%m%d-%H%M%S")}'
+        os.rename(nvda_path, moved_aside)
+
+    # 3. Swap the staged folder in; roll back on failure.
+    try:
+        os.rename(staging, nvda_path)
+    except Exception:
+        if moved_aside and not os.path.exists(nvda_path):
+            os.rename(moved_aside, nvda_path)
+        remove_tree(staging)
+        raise
+
+    # 4. Success — discard the folder we set aside.
+    if moved_aside:
+        remove_tree(moved_aside)
 
 
 def check_files_locked(folder_path: str) -> List[str]:
