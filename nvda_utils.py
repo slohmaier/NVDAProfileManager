@@ -9,7 +9,7 @@ import tempfile
 import time
 import winreg
 import zipfile
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 try:
     import psutil
@@ -211,46 +211,6 @@ def safe_restore(nvda_path: str, profile_path: str,
     # 4. Success — discard the folder we set aside.
     if moved_aside:
         remove_tree(moved_aside)
-
-
-def check_files_locked(folder_path: str) -> List[str]:
-    """Check if any files in the folder are locked.
-
-    Args:
-        folder_path: Path to the folder to check
-
-    Returns:
-        List of locked file paths
-    """
-    locked_files = []
-
-    if not os.path.exists(folder_path):
-        return locked_files
-
-    for root, dirs, files in os.walk(folder_path):
-        for filename in files:
-            filepath = os.path.join(root, filename)
-            try:
-                # Try to open file for exclusive access
-                with open(filepath, 'r+b'):
-                    pass
-            except (IOError, PermissionError, OSError):
-                locked_files.append(filepath)
-
-    return locked_files
-
-
-def check_folder_deletable(folder_path: str) -> tuple[bool, List[str]]:
-    """Check if the folder can be deleted (no locked files).
-
-    Args:
-        folder_path: Path to check
-
-    Returns:
-        Tuple of (can_delete, list_of_locked_files)
-    """
-    locked = check_files_locked(folder_path)
-    return len(locked) == 0, locked
 
 
 def get_executable_path() -> str:

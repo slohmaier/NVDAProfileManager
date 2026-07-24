@@ -221,53 +221,37 @@ class NVDAProfileManager(wx.Frame):
             wx.MessageBox('Please open a profile first', 'Error', wx.OK | wx.ICON_ERROR)
             return
 
-        # Check if any files are locked in NVDA folder
-        can_delete, locked_files = nvda_utils.check_folder_deletable(self.nvda_path)
-
-        if not can_delete:
-            # Files are locked, check if NVDA is running
-            if nvda_utils.is_nvda_running():
-                dlg = wx.MessageDialog(
-                    self,
-                    'NVDA is currently running and must be closed before restoring.\n\n'
-                    'Close NVDA now?',
-                    'NVDA Running',
-                    wx.YES_NO | wx.ICON_WARNING
-                )
-                if dlg.ShowModal() == wx.ID_YES:
-                    self.SetStatusText('Closing NVDA...')
-                    if not nvda_utils.stop_nvda():
-                        wx.MessageBox(
-                            'Could not close NVDA. Please close it manually and try again.',
-                            'Error',
-                            wx.OK | wx.ICON_ERROR
-                        )
-                        dlg.Destroy()
-                        return
-                    # Recheck if files are now unlocked
-                    can_delete, locked_files = nvda_utils.check_folder_deletable(self.nvda_path)
-                else:
-                    dlg.Destroy()
-                    return
-                dlg.Destroy()
-
-            # If files are still locked after closing NVDA
-            if not can_delete:
-                locked_list = '\n'.join(locked_files[:10])
-                if len(locked_files) > 10:
-                    locked_list += f'\n... and {len(locked_files) - 10} more files'
+        # The only real blocker is an open handle on the NVDA folder, which on
+        # Windows means NVDA itself is running (it keeps its config files open). A
+        # per-file "is this locked" scan was tried before but flagged NVDA's
+        # read-only add-on readme files as locked, which they are not; the atomic
+        # restore reports any genuine leftover lock on its own.
+        if nvda_utils.is_nvda_running():
+            dlg = wx.MessageDialog(
+                self,
+                'NVDA is currently running and must be closed before restoring.\n\n'
+                'Close NVDA now?',
+                'NVDA Running',
+                wx.YES_NO | wx.ICON_WARNING
+            )
+            close_now = dlg.ShowModal() == wx.ID_YES
+            dlg.Destroy()
+            if not close_now:
+                return
+            self.SetStatusText('Closing NVDA...')
+            if not nvda_utils.stop_nvda():
                 wx.MessageBox(
-                    f'The following files are locked by another process:\n\n{locked_list}\n\n'
-                    'Please close any programs accessing these files and try again.',
-                    'Files Locked',
+                    'Could not close NVDA. Please close it manually and try again.',
+                    'Error',
                     wx.OK | wx.ICON_ERROR
                 )
                 return
 
         # Confirm restore
         dlg = wx.MessageDialog(self,
-                              f'This will DELETE the current NVDA folder at:\n{self.nvda_path}\n\n'
-                              'and replace it with the backup. This cannot be undone!\n\n'
+                              f'This will replace the current NVDA folder at:\n{self.nvda_path}\n\n'
+                              'with the opened backup. Your current configuration is kept until the '
+                              'new one is safely in place, so a failure leaves it unchanged.\n\n'
                               'Continue?',
                               'Confirm Restore',
                               wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING)
@@ -296,7 +280,10 @@ class NVDAProfileManager(wx.Frame):
                 restart_dlg.Destroy()
 
             except Exception as e:
-                wx.MessageBox(f'Error restoring profile: {str(e)}', 'Error', wx.OK | wx.ICON_ERROR)
+                wx.MessageBox(
+                    f'Error restoring profile:\n{str(e)}\n\n'
+                    'Your existing NVDA configuration was left unchanged.',
+                    'Error', wx.OK | wx.ICON_ERROR)
 
         dlg.Destroy()
 
