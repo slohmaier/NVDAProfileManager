@@ -21,12 +21,27 @@ class NVDAProfileManager(wx.Frame):
         super().__init__(parent=None, title=f'NVDA Profile Manager v{VERSION}', size=(800, 600))
 
         self.current_profile_path = None
-        self.nvda_path = os.path.join(os.getenv('APPDATA'), 'nvda')
+        self._temp_profile_path = None
+
+        appdata = os.getenv('APPDATA')
+        self.nvda_path = os.path.join(appdata, 'nvda') if appdata else ''
 
         self.init_ui()
         self._set_icon()
+        self.Bind(wx.EVT_CLOSE, self.on_close)
         self.Centre()
         self.Show()
+
+        if not appdata:
+            wx.MessageBox(
+                'The APPDATA environment variable is not set, so the NVDA '
+                'configuration folder could not be located. Backup and restore '
+                'are unavailable.',
+                'NVDA folder not found', wx.OK | wx.ICON_ERROR)
+
+        # Sweep rollback/staging folders left behind by an interrupted restore.
+        if self.nvda_path:
+            nvda_utils.cleanup_stale_restore_dirs(self.nvda_path)
 
         # Load profile if passed via command line
         if profile_path and os.path.exists(profile_path):
@@ -133,21 +148,33 @@ class NVDAProfileManager(wx.Frame):
 
     def on_create_new(self, event):
         """Create a new NVDA profile backup"""
-        if not os.path.exists(self.nvda_path):
+        if not self.nvda_path or not os.path.exists(self.nvda_path):
             wx.MessageBox(f'NVDA folder not found at {self.nvda_path}', 'Error', wx.OK | wx.ICON_ERROR)
             return
 
-        # Create temporary .nvdaprofile
-        temp_dir = tempfile.gettempdir()
-        temp_profile_path = os.path.join(temp_dir, 'temp_nvda_profile.nvdaprofile')
+        # Build the backup into a fresh, uniquely-named temp file. mkstemp keeps
+        # it inside the temp dir (so on_save still recognises it as unsaved) while
+        # avoiding the old fixed name that two instances would clobber.
+        fd, temp_profile_path = tempfile.mkstemp(suffix='.nvdaprofile')
+        os.close(fd)
 
-        # Create the profile backup in temp directory
-        self.create_profile_backup(temp_profile_path)
+        if not self.create_profile_backup(temp_profile_path):
+            try:
+                os.remove(temp_profile_path)
+            except OSError:
+                pass
+            return
 
-        # Set current profile to temp file and load it
+        # Replace any earlier unsaved temp profile from this session.
+        self._discard_temp_profile()
+        self._temp_profile_path = temp_profile_path
         self.current_profile_path = temp_profile_path
         self.load_profile_info(temp_profile_path)
         self.SetStatusText('New profile created (unsaved)')
+        wx.MessageBox(
+            'A new profile was created from your current NVDA configuration.\n\n'
+            'It is not saved yet — use Save As to store it as a .nvdaprofile file.',
+            'Profile Created', wx.OK | wx.ICON_INFORMATION)
 
     def on_open(self, event):
         """Open an existing NVDA profile"""
@@ -178,9 +205,13 @@ class NVDAProfileManager(wx.Frame):
             self.on_save_as(event)
         else:
             # Already saved, just update the file
-            self.create_profile_backup(self.current_profile_path)
+            if not self.create_profile_backup(self.current_profile_path):
+                return
             self.load_profile_info(self.current_profile_path)
             self.SetStatusText(f'Saved profile: {os.path.basename(self.current_profile_path)}')
+            wx.MessageBox(
+                f'Profile saved to {os.path.basename(self.current_profile_path)}.',
+                'Saved', wx.OK | wx.ICON_INFORMATION)
 
     def on_save_as(self, event):
         """Save profile as new file"""
@@ -203,15 +234,28 @@ class NVDAProfileManager(wx.Frame):
             # Copy temp file to new location or create new backup
             temp_dir = tempfile.gettempdir()
             if self.current_profile_path.startswith(temp_dir):
-                # Copy temp file to permanent location
-                shutil.copy2(self.current_profile_path, path)
+                # Copy the already-built temp backup to the chosen location. The
+                # atomic swap means an error midway can't corrupt a backup that
+                # may already exist at the destination.
+                try:
+                    self._atomic_copy(self.current_profile_path, path)
+                except Exception as e:
+                    wx.MessageBox(f'Error saving profile: {str(e)}', 'Error', wx.OK | wx.ICON_ERROR)
+                    dlg.Destroy()
+                    return
+                self._discard_temp_profile()
             else:
                 # Create new backup from current NVDA folder
-                self.create_profile_backup(path)
+                if not self.create_profile_backup(path):
+                    dlg.Destroy()
+                    return
 
             self.current_profile_path = path
             self.load_profile_info(path)
             self.SetStatusText(f'Saved profile: {os.path.basename(path)}')
+            wx.MessageBox(
+                f'Profile saved to {os.path.basename(path)}.',
+                'Saved', wx.OK | wx.ICON_INFORMATION)
 
         dlg.Destroy()
 
@@ -291,6 +335,41 @@ class NVDAProfileManager(wx.Frame):
         """Exit application"""
         self.Close(True)
 
+    def on_close(self, event):
+        """Clean up an unsaved temp profile before the window closes."""
+        self._discard_temp_profile()
+        event.Skip()
+
+    def _discard_temp_profile(self):
+        """Delete the current unsaved temp-profile file, if any."""
+        if self._temp_profile_path and os.path.exists(self._temp_profile_path):
+            try:
+                os.remove(self._temp_profile_path)
+            except OSError:
+                pass
+        self._temp_profile_path = None
+
+    @staticmethod
+    def _atomic_copy(src, dst):
+        """Copy ``src`` onto ``dst`` via a same-directory temp file + os.replace.
+
+        A partial copy can never leave a corrupt file at ``dst`` — the swap only
+        happens once the full copy has succeeded.
+        """
+        dst_dir = os.path.dirname(os.path.abspath(dst))
+        os.makedirs(dst_dir, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(suffix='.nvdaprofile.tmp', dir=dst_dir)
+        os.close(fd)
+        try:
+            shutil.copy2(src, tmp)
+            os.replace(tmp, dst)
+        except Exception:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise
+
     def on_register_filetype(self, event):
         """Register .nvdaprofile file type association"""
         is_registered, location = nvda_utils.is_filetype_registered()
@@ -350,21 +429,34 @@ class NVDAProfileManager(wx.Frame):
         info.SetWebSite(GITHUB_URL, 'GitHub Repository')
         wx.adv.AboutBox(info)
 
-    def create_profile_backup(self, output_path, show_success=False):
-        """Create a backup of the NVDA profile"""
+    def create_profile_backup(self, output_path):
+        """Create a backup of the NVDA profile.
+
+        The archive is written to a temporary file on the same volume as
+        ``output_path`` and only swapped into place with an atomic ``os.replace``
+        once it is complete. An error midway (a file locked by a running NVDA, a
+        full disk) therefore leaves any existing backup at ``output_path``
+        untouched — the same rollback-safe guarantee ``nvda_utils.safe_restore``
+        gives the live configuration.
+
+        Returns True on success, False on failure (the error is already reported).
+        """
         self.SetStatusText('Creating backup...')
 
-        try:
-            # Create descriptor
-            descriptor = {
-                'username': os.getenv('USERNAME'),
-                'computer_name': os.getenv('COMPUTERNAME'),
-                'created_date': datetime.now().isoformat(),
-                'nvda_path': self.nvda_path
-            }
+        descriptor = {
+            'username': os.getenv('USERNAME'),
+            'computer_name': os.getenv('COMPUTERNAME'),
+            'created_date': datetime.now().isoformat(),
+            'nvda_path': self.nvda_path
+        }
 
-            # Create zip file
-            with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        out_dir = os.path.dirname(os.path.abspath(output_path))
+        os.makedirs(out_dir, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(suffix='.nvdaprofile.tmp', dir=out_dir)
+        os.close(fd)
+
+        try:
+            with zipfile.ZipFile(tmp_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 # Add descriptor
                 zipf.writestr('profile_descriptor.json', json.dumps(descriptor, indent=2))
 
@@ -382,13 +474,18 @@ class NVDAProfileManager(wx.Frame):
                         arcname = os.path.relpath(root, self.nvda_path).replace(os.sep, '/') + '/'
                         zipf.writestr(zipfile.ZipInfo(arcname), '')
 
-            if show_success:
-                wx.MessageBox(f'Profile backup created successfully!', 'Success', wx.OK | wx.ICON_INFORMATION)
+            os.replace(tmp_path, output_path)
 
         except Exception as e:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
             wx.MessageBox(f'Error creating backup: {str(e)}', 'Error', wx.OK | wx.ICON_ERROR)
             self.SetStatusText('Error creating backup')
-            raise
+            return False
+
+        return True
 
     def restore_profile(self, profile_path):
         """Restore NVDA profile from backup.
@@ -436,6 +533,10 @@ class NVDAProfileManager(wx.Frame):
 
                 # Add items to tree
                 self.add_tree_items(root, file_dict)
+
+                # Move focus to the contents tree so a screen reader announces the
+                # freshly loaded profile instead of leaving focus on the menu bar.
+                self.tree.SetFocus()
 
         except Exception as e:
             wx.MessageBox(f'Error loading profile: {str(e)}', 'Error', wx.OK | wx.ICON_ERROR)
