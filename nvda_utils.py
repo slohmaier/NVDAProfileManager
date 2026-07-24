@@ -1,6 +1,8 @@
 """NVDA Process Management Utilities"""
 
 import os
+import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -124,6 +126,31 @@ def start_nvda() -> bool:
         return True
     except Exception:
         return False
+
+
+def remove_tree(path: str) -> None:
+    """Delete a directory tree, clearing read-only attributes as it goes.
+
+    A plain ``shutil.rmtree`` aborts with ``PermissionError`` (WinError 5) the moment
+    it hits a read-only file, and NVDA ships several (the add-on ``readme`` files).
+    On Windows that used to leave a half-deleted NVDA folder behind. The error
+    handler here clears the read-only bit and retries the failed operation.
+    """
+    if not os.path.exists(path):
+        return
+
+    def clear_readonly_and_retry(func, failed_path, _exc):
+        os.chmod(failed_path, stat.S_IWRITE)
+        func(failed_path)
+
+    # onexc replaced the deprecated onerror in Python 3.12; support both.
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=clear_readonly_and_retry)
+    else:
+        shutil.rmtree(
+            path,
+            onerror=lambda func, p, exc_info: clear_readonly_and_retry(func, p, exc_info),
+        )
 
 
 def check_files_locked(folder_path: str) -> List[str]:
