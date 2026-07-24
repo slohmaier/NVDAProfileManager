@@ -388,6 +388,13 @@ class NVDAProfileManager(wx.Frame):
                         arcname = os.path.relpath(file_path, self.nvda_path)
                         zipf.write(file_path, arcname)
 
+                    # Preserve empty directories, which the file loop above would
+                    # otherwise drop. NVDA relies on several of them existing
+                    # (e.g. profiles/, updates/, speechDicts/...).
+                    if not files and not dirs and os.path.abspath(root) != os.path.abspath(self.nvda_path):
+                        arcname = os.path.relpath(root, self.nvda_path).replace(os.sep, '/') + '/'
+                        zipf.writestr(zipfile.ZipInfo(arcname), '')
+
             if show_success:
                 wx.MessageBox(f'Profile backup created successfully!', 'Success', wx.OK | wx.ICON_INFORMATION)
 
