@@ -6,8 +6,18 @@ A Python wxPython application for managing NVDA screen reader profiles.
 
 - **Backup NVDA Profiles**: Create `.nvdaprofile` backup files from your NVDA configuration
 - **Restore Profiles**: Restore NVDA configuration from `.nvdaprofile` backups
+- **Undo Restore**: Bring back the configuration that was replaced by the last restore
+- **NVDA-aware**: Backups and restores require NVDA to be closed; the app offers to close it,
+  and waits for it to fully exit before touching the configuration folder
 - **Profile Inspection**: View contents of `.nvdaprofile` files in a tree view
 - **Profile Metadata**: Each backup includes username, PC name, and creation date
+
+## Safe Restore
+
+Restore replaces the NVDA folder atomically: the backup is staged first, then swapped in, so a
+failure leaves your current configuration untouched. The replaced configuration is kept as a
+rollback folder, so you can revert with **File > Undo Last Restore**. The newest three rollback
+folders are retained.
 
 ## Requirements
 
@@ -25,6 +35,14 @@ pip install wxPython
 ```powershell
 python main.py
 ```
+
+## Testing
+
+```powershell
+python -m unittest discover -s tests
+```
+
+The tests are sandboxed and never touch the real NVDA configuration folder.
 
 ## Profile Location
 

@@ -42,6 +42,7 @@ class NVDAProfileManager(wx.Frame):
         # Sweep rollback/staging folders left behind by an interrupted restore.
         if self.nvda_path:
             nvda_utils.cleanup_stale_restore_dirs(self.nvda_path)
+        self._update_undo_state()
 
         # Load profile if passed via command line
         if profile_path and os.path.exists(profile_path):
@@ -88,6 +89,7 @@ class NVDAProfileManager(wx.Frame):
         save_as_item = file_menu.Append(wx.ID_SAVEAS, 'Save &As\tCtrl+Shift+S', 'Save NVDA profile as')
         file_menu.AppendSeparator()
         restore_item = file_menu.Append(wx.ID_ANY, '&Restore Profile', 'Restore NVDA profile from backup')
+        self.undo_item = file_menu.Append(wx.ID_ANY, '&Undo Last Restore', 'Restore the NVDA configuration that was replaced by the last restore')
         file_menu.AppendSeparator()
         exit_item = file_menu.Append(wx.ID_EXIT, 'E&xit\tCtrl+Q', 'Exit application')
 
@@ -113,6 +115,7 @@ class NVDAProfileManager(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_save, save_item)
         self.Bind(wx.EVT_MENU, self.on_save_as, save_as_item)
         self.Bind(wx.EVT_MENU, self.on_restore, restore_item)
+        self.Bind(wx.EVT_MENU, self.on_undo_restore, self.undo_item)
         self.Bind(wx.EVT_MENU, self.on_exit, exit_item)
         self.Bind(wx.EVT_MENU, self.on_register_filetype, register_item)
         self.Bind(wx.EVT_MENU, self.on_github, github_item)
@@ -259,6 +262,54 @@ class NVDAProfileManager(wx.Frame):
 
         dlg.Destroy()
 
+    def _ensure_nvda_closed(self):
+        """Make sure NVDA is not running before touching its configuration.
+
+        NVDA keeps its configuration files open and saves its settings on exit, so
+        a backup taken while it runs can be inconsistent and a restore will fail on
+        the locked folder. If NVDA is running, offer to close it; return False if it
+        could not be closed so the caller blocks the operation.
+        """
+        if not nvda_utils.is_nvda_running():
+            return True
+
+        dlg = wx.MessageDialog(
+            self,
+            'NVDA is currently running and must be closed first.\n\n'
+            'Its settings are saved on exit, so closing it also ensures your '
+            'configuration is consistent.\n\n'
+            'Close NVDA now?',
+            'NVDA Running',
+            wx.YES_NO | wx.ICON_WARNING
+        )
+        close_now = dlg.ShowModal() == wx.ID_YES
+        dlg.Destroy()
+        if not close_now:
+            return False
+
+        self.SetStatusText('Closing NVDA...')
+        if not nvda_utils.stop_nvda():
+            hint = ''
+            if not nvda_utils.is_admin():
+                hint = ('\n\nNVDA may be running elevated. Try running this '
+                        'application as administrator.')
+            wx.MessageBox(
+                'Could not close NVDA. Please close it manually and try again.'
+                + hint,
+                'Error',
+                wx.OK | wx.ICON_ERROR
+            )
+            return False
+
+        return True
+
+    def _update_undo_state(self):
+        """Enable the Undo Last Restore item only when a rollback exists."""
+        if not self.undo_item or not self.nvda_path:
+            return
+        has_backup = nvda_utils.has_rollback(self.nvda_path)
+        self.undo_item.Enable(has_backup)
+
     def on_restore(self, event):
         """Restore NVDA profile from backup"""
         if not self.current_profile_path:
@@ -266,30 +317,10 @@ class NVDAProfileManager(wx.Frame):
             return
 
         # The only real blocker is an open handle on the NVDA folder, which on
-        # Windows means NVDA itself is running (it keeps its config files open). A
-        # per-file "is this locked" scan was tried before but flagged NVDA's
-        # read-only add-on readme files as locked, which they are not; the atomic
-        # restore reports any genuine leftover lock on its own.
-        if nvda_utils.is_nvda_running():
-            dlg = wx.MessageDialog(
-                self,
-                'NVDA is currently running and must be closed before restoring.\n\n'
-                'Close NVDA now?',
-                'NVDA Running',
-                wx.YES_NO | wx.ICON_WARNING
-            )
-            close_now = dlg.ShowModal() == wx.ID_YES
-            dlg.Destroy()
-            if not close_now:
-                return
-            self.SetStatusText('Closing NVDA...')
-            if not nvda_utils.stop_nvda():
-                wx.MessageBox(
-                    'Could not close NVDA. Please close it manually and try again.',
-                    'Error',
-                    wx.OK | wx.ICON_ERROR
-                )
-                return
+        # Windows means NVDA itself is running (it keeps its config files open).
+        # Close it first, gracefully, so its settings are flushed to disk.
+        if not self._ensure_nvda_closed():
+            return
 
         # Confirm restore
         dlg = wx.MessageDialog(self,
@@ -304,11 +335,15 @@ class NVDAProfileManager(wx.Frame):
             try:
                 self.restore_profile(self.current_profile_path)
                 self.SetStatusText('Profile restored successfully')
+                self._update_undo_state()
 
                 # Ask if user wants to restart NVDA
                 restart_dlg = wx.MessageDialog(
                     self,
-                    'Profile restored successfully!\n\nWould you like to start NVDA now?',
+                    'Profile restored successfully!\n\n'
+                    'Your previous configuration was kept and can be brought back '
+                    'via File > Undo Last Restore.\n\n'
+                    'Would you like to start NVDA now?',
                     'Restore Complete',
                     wx.YES_NO | wx.ICON_QUESTION
                 )
@@ -330,6 +365,44 @@ class NVDAProfileManager(wx.Frame):
                     'Error', wx.OK | wx.ICON_ERROR)
 
         dlg.Destroy()
+
+    def on_undo_restore(self, event):
+        """Bring back the configuration that was replaced by the last restore."""
+        if not self.nvda_path:
+            return
+        if not nvda_utils.has_rollback(self.nvda_path):
+            wx.MessageBox('There is no previous configuration to restore.',
+                          'Undo Restore', wx.OK | wx.ICON_INFORMATION)
+            return
+
+        if not self._ensure_nvda_closed():
+            return
+
+        dlg = wx.MessageDialog(
+            self,
+            'This will bring back your previous NVDA configuration, replacing '
+            'the one currently in place.\n\n'
+            'Continue?',
+            'Undo Last Restore',
+            wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING)
+        if dlg.ShowModal() != wx.ID_YES:
+            dlg.Destroy()
+            return
+        dlg.Destroy()
+
+        try:
+            self.SetStatusText('Undoing last restore...')
+            nvda_utils.undo_restore(self.nvda_path)
+            self.SetStatusText('Previous configuration restored')
+            self._update_undo_state()
+            wx.MessageBox(
+                'Your previous NVDA configuration has been restored.',
+                'Undo Restore Complete', wx.OK | wx.ICON_INFORMATION)
+        except Exception as e:
+            wx.MessageBox(
+                f'Error undoing restore:\n{str(e)}\n\n'
+                'Your current configuration was left unchanged.',
+                'Error', wx.OK | wx.ICON_ERROR)
 
     def on_exit(self, event):
         """Exit application"""
@@ -432,15 +505,20 @@ class NVDAProfileManager(wx.Frame):
     def create_profile_backup(self, output_path):
         """Create a backup of the NVDA profile.
 
-        The archive is written to a temporary file on the same volume as
-        ``output_path`` and only swapped into place with an atomic ``os.replace``
-        once it is complete. An error midway (a file locked by a running NVDA, a
-        full disk) therefore leaves any existing backup at ``output_path``
-        untouched — the same rollback-safe guarantee ``nvda_utils.safe_restore``
-        gives the live configuration.
+        Builds the archive via nvda_utils.build_profile_archive, which writes to a
+        temporary file on the same volume and swaps it into place atomically, so an
+        error midway (a file locked by a running NVDA, a full disk) leaves any
+        existing backup at ``output_path`` untouched — the same rollback-safe
+        guarantee nvda_utils.safe_restore gives the live configuration. Leftover
+        NVDA ``*.tmp`` files are excluded.
 
         Returns True on success, False on failure (the error is already reported).
         """
+        # NVDA writes its settings on exit, so a backup taken while it runs may be
+        # stale or mid-write. Require it to be closed first.
+        if not self._ensure_nvda_closed():
+            return False
+
         self.SetStatusText('Creating backup...')
 
         descriptor = {
@@ -450,37 +528,9 @@ class NVDAProfileManager(wx.Frame):
             'nvda_path': self.nvda_path
         }
 
-        out_dir = os.path.dirname(os.path.abspath(output_path))
-        os.makedirs(out_dir, exist_ok=True)
-        fd, tmp_path = tempfile.mkstemp(suffix='.nvdaprofile.tmp', dir=out_dir)
-        os.close(fd)
-
         try:
-            with zipfile.ZipFile(tmp_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                # Add descriptor
-                zipf.writestr('profile_descriptor.json', json.dumps(descriptor, indent=2))
-
-                # Add all files from NVDA folder
-                for root, dirs, files in os.walk(self.nvda_path):
-                    for file in files:
-                        file_path = os.path.join(root, file)
-                        arcname = os.path.relpath(file_path, self.nvda_path)
-                        zipf.write(file_path, arcname)
-
-                    # Preserve empty directories, which the file loop above would
-                    # otherwise drop. NVDA relies on several of them existing
-                    # (e.g. profiles/, updates/, speechDicts/...).
-                    if not files and not dirs and os.path.abspath(root) != os.path.abspath(self.nvda_path):
-                        arcname = os.path.relpath(root, self.nvda_path).replace(os.sep, '/') + '/'
-                        zipf.writestr(zipfile.ZipInfo(arcname), '')
-
-            os.replace(tmp_path, output_path)
-
+            nvda_utils.build_profile_archive(self.nvda_path, output_path, descriptor)
         except Exception as e:
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
             wx.MessageBox(f'Error creating backup: {str(e)}', 'Error', wx.OK | wx.ICON_ERROR)
             self.SetStatusText('Error creating backup')
             return False

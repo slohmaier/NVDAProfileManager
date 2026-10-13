@@ -11,10 +11,18 @@ NVDA Profile Manager is a Python3 wxPython application that manages NVDA screen 
 - **Backup**: Creates `.nvdaprofile` files (ZIP archives) containing all NVDA configuration files and
   folders. The archive is built in a same-volume temp file and swapped in with an atomic
   `os.replace`, so a failure midway never corrupts an existing backup at the destination
-  (`NVDAProfileManager.create_profile_backup`)
+  (`nvda_utils.build_profile_archive`). Leftover NVDA `*.tmp` files are excluded.
 - **Restore**: Replaces the NVDA folder from a `.nvdaprofile` backup atomically — the backup is
   staged, then swapped in, keeping the current folder until the swap succeeds so a failure rolls
-  back (`nvda_utils.safe_restore`)
+  back (`nvda_utils.safe_restore`). The replaced configuration is **retained as a rollback
+  folder** (`<nvda>.bak-<timestamp>`) so the restore can be undone via File > Undo Last Restore
+  (`nvda_utils.undo_restore`).
+- **NVDA Handling**: NVDA saves its settings on exit and keeps its config files open, so both
+  backup and restore require NVDA to be closed first (`main.NVDAProfileManager._ensure_nvda_closed`).
+  If it is running the user is offered to close it; `nvda_utils.stop_nvda` quits the main process
+  (flushing settings) and clears any lingering `nvda_slave.exe` helper, which otherwise holds
+  folder handles. Detection covers both processes and portable installs
+  (`nvda_utils.get_running_nvda_processes`, `find_nvda_executable`).
 - **Profile Descriptor**: Each `.nvdaprofile` contains metadata (username, PC name, creation date)
 - **File Viewer**: Tree view to inspect contents of `.nvdaprofile` files before restoring
 
@@ -38,17 +46,37 @@ python main.py
 pip install wxPython
 ```
 
+**Run the tests** (sandboxed, never touch the real NVDA folder):
+```powershell
+python -m unittest discover -s tests
+```
+
+## Testing
+
+- `tests/test_nvda_utils.py` covers restore/rollback/undo, backup archive helpers
+  (incl. `*.tmp` exclusion and empty-dir preservation), cleanup pruning, read-only
+  removal, and process detection with a mocked psutil.
+- The suite operates only on temp directories. Live NVDA testing (stopping/starting
+  NVDA and swapping the real config) is intentionally NOT part of the suite.
+
 ## Key Technical Details
 
 - **NVDA Path**: Default profile location is `%APPDATA%\nvda` (typically `C:\Users\<username>\AppData\Roaming\nvda`)
 - **File Format**: `.nvdaprofile` is a ZIP archive with a descriptor file containing JSON metadata
 - **Restore Process**: `nvda_utils.safe_restore` stages the extraction, moves the current folder
-  aside with an atomic rename, swaps the staged folder in, and only then deletes the set-aside copy.
+  aside with an atomic rename (retried briefly via `_rename_with_retry` to ride out transient
+  Windows locks), swaps the staged folder in, and on success keeps the set-aside folder as a
+  rollback point. `nvda_utils.undo_restore` swaps the newest rollback back in.
   Read-only files (NVDA ships read-only add-on readmes) are handled by `nvda_utils.remove_tree`.
+- **Starting NVDA**: the installed `nvda.exe` has a UIAccess manifest, so `subprocess.Popen`
+  fails with WinError 740. `nvda_utils.start_nvda` uses `os.startfile` (ShellExecute) instead,
+  falling back to `Popen`.
 
 ## Important Considerations
 
-- Always verify NVDA is not running before performing restore operations to avoid file locks
+- Restore and backup require NVDA to be closed; the GUI blocks and offers to close it first
+- Rollback folders (`<nvda>.bak-*`) are kept; `cleanup_stale_restore_dirs` prunes them to the
+  newest 3 and deletes only orphaned `nvda_restore_*` staging directories
 - Include proper error handling for file system operations (permissions, disk space, locked files)
-- Prompt for confirmation before destructive operations (restore/delete)
+- Prompt for confirmation before destructive operations (restore/undo/delete)
 - Use `os.path.expandvars` or `os.getenv('APPDATA')` to handle user-specific paths correctly
