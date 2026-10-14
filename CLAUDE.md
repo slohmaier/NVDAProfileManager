@@ -53,10 +53,17 @@ python -m unittest discover -s tests
 
 **Build, installer, signing** (all via SCons):
 ```powershell
-scons build       # dist\NVDAProfileManager.exe
+scons build       # dist\NVDAProfileManager.exe (+ refreshes the dev Start Menu entry)
 scons installer   # signs the exe, compiles + signs the Inno Setup installer
 scons sign        # sign the existing exe and installer in place
+scons shortcut    # (re)create the dev Start Menu shortcut only
 ```
+
+**Dev Start Menu entry:** every `scons build` (re)points
+`%APPDATA%\...\Start Menu\Programs\slohmaierDev\NVDAProfileManager (Dev).lnk` at
+the freshly built `dist\NVDAProfileManager.exe`, via the shared
+`tools\install-dev-shortcut.ps1` (the same launcher group used by ControlNav,
+MouseCross, TactiDesk, etc.). `scons shortcut` refreshes it on demand.
 
 ## Signing
 

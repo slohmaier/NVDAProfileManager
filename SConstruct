@@ -7,6 +7,7 @@ Targets:
     scons build     - Build NVDAProfileManager.exe
     scons installer - Build + sign the exe, compile + sign the Inno Setup installer
     scons sign      - Sign the existing exe and installer (via sign-products.ps1)
+    scons shortcut  - (Re)create the slohmaierDev Start Menu shortcut
     scons run       - Run the application
     scons clean     - Clean build artifacts
 
@@ -249,6 +250,32 @@ def generate_icon(target, source, env):
     return None
 
 
+DEV_SHORTCUT_SCRIPT = os.path.join('tools', 'install-dev-shortcut.ps1')
+
+
+def refresh_dev_shortcut():
+    """Point the slohmaierDev Start Menu shortcut at the current build.
+
+    Idempotent and shared with every slohmaier product: the shortcut lives at
+    %APPDATA%\\...\\Start Menu\\Programs\\slohmaierDev\\<Name> (Dev).lnk. No-op
+    when the script or the freshly built exe is missing.
+    """
+    script = os.path.join(REPO_ROOT, DEV_SHORTCUT_SCRIPT)
+    exe = os.path.join(REPO_ROOT, DIST_DIR, f'{EXE_NAME}.exe')
+    icon = os.path.join(REPO_ROOT, ICON_FILE)
+    if not os.path.exists(script) or not os.path.exists(exe):
+        return 0
+    cmd = ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script,
+           '-Name', EXE_NAME, '-Target', exe,
+           '-WorkDir', os.path.dirname(exe), '-Icon', icon]
+    return subprocess.run(cmd, cwd=REPO_ROOT).returncode
+
+
+def dev_shortcut(target, source, env):
+    """SCons action: refresh the dev Start Menu shortcut."""
+    return refresh_dev_shortcut()
+
+
 def build_exe(target, source, env):
     """Build the executable using PyInstaller."""
     # Use absolute paths for icon
@@ -270,6 +297,7 @@ def build_exe(target, source, env):
     if result.returncode != 0:
         return 1
     print(f"Built {DIST_DIR}/{EXE_NAME}.exe")
+    refresh_dev_shortcut()
     return None
 
 
@@ -299,6 +327,10 @@ env.Append(BUILDERS={'InstallerBuilder': installer_builder})
 sign_builder = Builder(action=sign_only)
 env.Append(BUILDERS={'SignBuilder': sign_builder})
 
+# Dev Start Menu shortcut builder (also refreshed after every exe build)
+shortcut_builder = Builder(action=dev_shortcut)
+env.Append(BUILDERS={'ShortcutBuilder': shortcut_builder})
+
 # Define targets
 icon_target = env.IconBuilder(ICON_FILE, MAIN_SCRIPT)
 exe_target = env.ExeBuilder(f'{DIST_DIR}/{EXE_NAME}.exe', [MAIN_SCRIPT, 'nvda_utils.py', ICON_FILE])
@@ -309,6 +341,7 @@ installer_target = env.InstallerBuilder(
     os.path.join(INSTALLER_OUTPUT_DIR, f'{EXE_NAME}-Setup-{VERSION}.exe'),
     [exe_target, ISS_FILE])
 sign_target = env.SignBuilder('sign_marker', [])
+shortcut_target = env.ShortcutBuilder('shortcut_marker', [])
 
 # Dependencies
 env.Depends(exe_target, icon_target)
@@ -319,6 +352,7 @@ env.Alias('build', exe_target)
 env.Alias('run', run_target)
 env.Alias('installer', installer_target)
 env.Alias('sign', sign_target)
+env.Alias('shortcut', shortcut_target)
 
 # Default target
 Default(exe_target)
@@ -327,6 +361,7 @@ Default(exe_target)
 env.AlwaysBuild(run_target)
 env.AlwaysBuild(installer_target)
 env.AlwaysBuild(sign_target)
+env.AlwaysBuild(shortcut_target)
 
 # Clean targets
 Clean(exe_target, [
@@ -337,3 +372,4 @@ Clean(exe_target, [
     'run_marker'
 ])
 Clean(installer_target, [INSTALLER_OUTPUT_DIR, 'sign_marker'])
+Clean(shortcut_target, ['shortcut_marker'])

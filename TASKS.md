@@ -17,6 +17,8 @@
 - SCons targets `installer` and `sign`; signing via shared `sign-products.ps1`
 - Signing config template `ssign.conf.example` (real `ssign.conf` git-ignored);
   no Certum/ssign material in the repo
+- Dev Start Menu entry: `tools/install-dev-shortcut.ps1` + `scons shortcut`,
+  refreshed automatically after every `scons build` (slohmaierDev launcher group)
 - v1.1 released with signed installer
 
 ## Open
