@@ -1,0 +1,16 @@
+# NVDA Profile Manager - local code-signing configuration (TEMPLATE)
+#
+# Copy this file to "ssign.conf" next to it and adjust the path for your machine.
+# "ssign.conf" is git-ignored and must NEVER be committed.
+#
+# NON-SECRET ONLY. This file holds just the *location* of the signing tooling.
+# It must never contain the Certum TOTP seed, the encrypted seed blob, or any
+# certificate/key material. The seed is resolved at signing time by
+# sign-products.ps1 (from the CERTUM_OTP environment variable, the encrypted
+# seed.enc via CERTUM_OTP_KEY, or otpauthuri.txt) - all outside this repository.
+
+# Directory that contains sign-products.ps1 (and ssign.exe).
+sign_dir = C:\path\to\ownCloud\Personal\slohmaier.com\code-signing\certum-codesigning
+
+# The signing script inside sign_dir.
+sign_script = sign-products.ps1

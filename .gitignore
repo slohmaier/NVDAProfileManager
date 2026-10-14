@@ -47,5 +47,20 @@ run_marker
 icon_preview.png
 .sconsign.dblite
 
+# Inno Setup installer output
+installer/output/
+
 # Claude Code local settings
 .claude/
+
+# Code signing - NEVER commit any Certum/ssign material.
+# Local signing config (paths only); use ssign.conf.example as the template.
+ssign.conf
+seed.enc
+otpauthuri.txt
+otpauthuri.txt.*
+*.cer
+*.pem
+*.pfx
+ssign.exe
+*.orig

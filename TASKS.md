@@ -13,6 +13,11 @@
   has a UIAccess manifest and `Popen` fails with WinError 740
 - Sandboxed unit tests (`tests/test_nvda_utils.py`, 20 tests)
 - Live end-to-end test on this machine (stop / restore / undo / start): passed
+- Inno Setup installer (`installer/NVDAProfileManager.iss`)
+- SCons targets `installer` and `sign`; signing via shared `sign-products.ps1`
+- Signing config template `ssign.conf.example` (real `ssign.conf` git-ignored);
+  no Certum/ssign material in the repo
+- v1.1 released with signed installer
 
 ## Open
 

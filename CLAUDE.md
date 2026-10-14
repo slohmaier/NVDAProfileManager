@@ -51,6 +51,26 @@ pip install wxPython
 python -m unittest discover -s tests
 ```
 
+**Build, installer, signing** (all via SCons):
+```powershell
+scons build       # dist\NVDAProfileManager.exe
+scons installer   # signs the exe, compiles + signs the Inno Setup installer
+scons sign        # sign the existing exe and installer in place
+```
+
+## Signing
+
+Signing uses the Certum SimplySign cloud certificate through the shared
+`sign-products.ps1` in the ownCloud secrets share (the single source of truth).
+No Certum/ssign material (seed, certificate, `ssign.exe`) is ever stored in this
+repository. The SConstruct reads the tooling location from a local, git-ignored
+`ssign.conf` (template: `ssign.conf.example`, keys `sign_dir` and `sign_script`),
+falling back to `OWNCLOUD_SIGN_DIR` and then a default path.
+
+`scons installer` signs the payload exe first (so the copy embedded in Setup.exe
+is signed), compiles the installer, then signs the Setup.exe. Signing failures
+are retried because the Certum backend rate-limits logins.
+
 ## Testing
 
 - `tests/test_nvda_utils.py` covers restore/rollback/undo, backup archive helpers

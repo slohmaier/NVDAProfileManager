@@ -5,14 +5,22 @@ Targets:
     scons           - Build everything (icon + exe)
     scons icon      - Generate icon.ico
     scons build     - Build NVDAProfileManager.exe
+    scons installer - Build + sign the exe, compile + sign the Inno Setup installer
+    scons sign      - Sign the existing exe and installer (via sign-products.ps1)
     scons run       - Run the application
     scons clean     - Clean build artifacts
+
+Signing uses the Certum SimplySign cloud certificate through the shared script in
+the ownCloud secrets share (the single source of truth). No Certum material --
+seed, certificate, or ssign.exe -- is stored in this repository; only the path to
+that external script is referenced here.
 """
 
 import os
 import sys
 import subprocess
 import math
+import time
 
 # Environment setup
 env = Environment(ENV=os.environ)
@@ -23,6 +31,129 @@ ICON_PREVIEW = 'icon_preview.png'
 MAIN_SCRIPT = 'main.py'
 EXE_NAME = 'NVDAProfileManager'
 DIST_DIR = 'dist'
+
+# Installer / signing
+REPO_ROOT = Dir('.').abspath
+ISS_FILE = os.path.join('installer', 'NVDAProfileManager.iss')
+INSTALLER_OUTPUT_DIR = os.path.join('installer', 'output')
+
+# Signing is delegated to the shared sign-products.ps1 in the ownCloud secrets
+# share. That script owns the Certum SimplySign login and resolves the TOTP seed
+# itself (CERTUM_OTP env, encrypted seed.enc via CERTUM_OTP_KEY, or
+# otpauthuri.txt) -- none of which lives in this repository. Only the *location*
+# is configured, via a local, git-ignored ssign.conf (see ssign.conf.example).
+SIGN_CONF = 'ssign.conf'
+DEFAULT_SIGN_DIR = (r'C:\Users\stefa\ownCloud\Personal\slohmaier.com'
+                    r'\code-signing\certum-codesigning')
+
+
+def load_sign_config():
+    """Read the local ssign.conf (key = value), or an empty dict if absent."""
+    cfg = {}
+    path = os.path.join(REPO_ROOT, SIGN_CONF)
+    if os.path.exists(path):
+        with open(path, encoding='utf-8') as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith('#') or '=' not in line:
+                    continue
+                key, value = line.split('=', 1)
+                cfg[key.strip()] = value.strip()
+    return cfg
+
+
+_sign_cfg = load_sign_config()
+SIGN_DIR = (_sign_cfg.get('sign_dir')
+            or os.environ.get('OWNCLOUD_SIGN_DIR')
+            or DEFAULT_SIGN_DIR)
+SIGN_SCRIPT = os.path.join(SIGN_DIR, _sign_cfg.get('sign_script', 'sign-products.ps1'))
+
+
+def read_version():
+    """Read VERSION from main.py (single source of truth for the app version)."""
+    with open(os.path.join(REPO_ROOT, MAIN_SCRIPT), encoding='utf-8') as fh:
+        for line in fh:
+            if line.startswith('VERSION'):
+                return line.split('=', 1)[1].strip().strip('"').strip("'")
+    return '0.0.0'
+
+
+def find_iscc():
+    """Locate the Inno Setup compiler."""
+    candidates = [
+        r'C:\Program Files (x86)\Inno Setup 6\ISCC.exe',
+        r'C:\Program Files\Inno Setup 6\ISCC.exe',
+    ]
+    for base in (os.environ.get('ProgramFiles(x86)', ''),
+                 os.environ.get('ProgramFiles', '')):
+        if base:
+            candidates.append(os.path.join(base, 'Inno Setup 6', 'ISCC.exe'))
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+    return None
+
+
+def run_sign(include, retries=3, delay=45):
+    """Sign files through the shared sign-products.ps1 (Certum SimplySign).
+
+    ``include`` is a wildcard matched against full paths. The Certum backend
+    accepts only one ssign login per short window, so a failed login (e.g. the
+    setup sign right after the payload sign) is retried after a delay.
+    """
+    if not os.path.exists(SIGN_SCRIPT):
+        print('Signing script not found: %s' % SIGN_SCRIPT)
+        return False
+
+    cmd = ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+           '-File', SIGN_SCRIPT, '-Include', include]
+    for attempt in range(1, retries + 1):
+        print('Signing (attempt %d/%d): %s' % (attempt, retries, include))
+        result = subprocess.run(cmd)
+        if result.returncode == 0:
+            return True
+        if attempt < retries:
+            print('Signing failed; waiting %ds for the Certum login window...' % delay)
+            time.sleep(delay)
+    return False
+
+
+def build_installer(target, source, env):
+    """Sign the payload, compile the installer, then sign the Setup.exe."""
+    iscc = find_iscc()
+    if not iscc:
+        print('ERROR: Inno Setup compiler (ISCC.exe) not found.')
+        return 1
+
+    version = read_version()
+
+    # 1. Sign the payload first, so the exe embedded in Setup.exe is signed.
+    if not run_sign(r'*nvdaprofilemanager\dist\*'):
+        print('ERROR: payload signing failed.')
+        return 1
+
+    # 2. Compile the installer (embeds the now-signed payload).
+    print('Compiling installer v%s...' % version)
+    result = subprocess.run(
+        [iscc, '/DMyAppVersion=%s' % version, ISS_FILE], cwd=REPO_ROOT)
+    if result.returncode != 0:
+        print('ERROR: ISCC failed (%d).' % result.returncode)
+        return 1
+
+    # 3. Sign the produced Setup.exe (fresh login).
+    if not run_sign(r'*nvdaprofilemanager\installer\output\*'):
+        print('ERROR: installer signing failed.')
+        return 1
+
+    print('Installer built and signed under %s' % INSTALLER_OUTPUT_DIR)
+    return None
+
+
+def sign_only(target, source, env):
+    """Sign the existing exe and installer in place."""
+    ok_payload = run_sign(r'*nvdaprofilemanager\dist\*')
+    ok_setup = run_sign(r'*nvdaprofilemanager\installer\output\*')
+    return None if (ok_payload and ok_setup) else 1
 
 
 def generate_icon(target, source, env):
@@ -160,10 +291,24 @@ env.Append(BUILDERS={'ExeBuilder': exe_builder})
 run_builder = Builder(action=run_app)
 env.Append(BUILDERS={'RunBuilder': run_builder})
 
+# Installer builder (sign payload -> compile -> sign Setup.exe)
+installer_builder = Builder(action=build_installer)
+env.Append(BUILDERS={'InstallerBuilder': installer_builder})
+
+# Sign-only builder
+sign_builder = Builder(action=sign_only)
+env.Append(BUILDERS={'SignBuilder': sign_builder})
+
 # Define targets
 icon_target = env.IconBuilder(ICON_FILE, MAIN_SCRIPT)
 exe_target = env.ExeBuilder(f'{DIST_DIR}/{EXE_NAME}.exe', [MAIN_SCRIPT, 'nvda_utils.py', ICON_FILE])
 run_target = env.RunBuilder('run_marker', MAIN_SCRIPT)
+
+VERSION = read_version()
+installer_target = env.InstallerBuilder(
+    os.path.join(INSTALLER_OUTPUT_DIR, f'{EXE_NAME}-Setup-{VERSION}.exe'),
+    [exe_target, ISS_FILE])
+sign_target = env.SignBuilder('sign_marker', [])
 
 # Dependencies
 env.Depends(exe_target, icon_target)
@@ -172,12 +317,16 @@ env.Depends(exe_target, icon_target)
 env.Alias('icon', icon_target)
 env.Alias('build', exe_target)
 env.Alias('run', run_target)
+env.Alias('installer', installer_target)
+env.Alias('sign', sign_target)
 
 # Default target
 Default(exe_target)
 
-# Always build run target (no actual file to track)
+# Always build targets that run external actions (no reliable file tracking)
 env.AlwaysBuild(run_target)
+env.AlwaysBuild(installer_target)
+env.AlwaysBuild(sign_target)
 
 # Clean targets
 Clean(exe_target, [
@@ -187,3 +336,4 @@ Clean(exe_target, [
     '__pycache__',
     'run_marker'
 ])
+Clean(installer_target, [INSTALLER_OUTPUT_DIR, 'sign_marker'])

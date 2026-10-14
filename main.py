@@ -12,7 +12,7 @@ from pathlib import Path
 
 import nvda_utils
 
-VERSION = "1.0"
+VERSION = "1.1"
 GITHUB_URL = "https://github.com/slohmaier/NVDAProfileManager"
 
 
