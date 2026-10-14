@@ -259,5 +259,18 @@ class TestStartNvda(unittest.TestCase):
             self.assertFalse(nvda_utils.start_nvda())
 
 
+class TestWaitForNvdaStart(unittest.TestCase):
+    def test_returns_true_once_process_is_up(self):
+        with mock.patch('nvda_utils.get_nvda_process',
+                        return_value=FakeProc('nvda.exe')), \
+                mock.patch('nvda_utils.time.sleep'):
+            self.assertTrue(nvda_utils.wait_for_nvda_start(timeout=5))
+
+    def test_returns_false_on_timeout(self):
+        with mock.patch('nvda_utils.get_nvda_process', return_value=None), \
+                mock.patch('nvda_utils.time.sleep'):
+            self.assertFalse(nvda_utils.wait_for_nvda_start(timeout=0.1))
+
+
 if __name__ == '__main__':
     unittest.main()

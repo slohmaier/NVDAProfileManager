@@ -8,7 +8,8 @@ A Python wxPython application for managing NVDA screen reader profiles.
 - **Restore Profiles**: Restore NVDA configuration from `.nvdaprofile` backups
 - **Undo Restore**: Bring back the configuration that was replaced by the last restore
 - **NVDA-aware**: Backups and restores require NVDA to be closed; the app offers to close it,
-  and waits for it to fully exit before touching the configuration folder
+  waits for it to fully exit before touching the configuration folder, and starts NVDA again
+  automatically when it is done — so you resume with your screen reader running
 - **Profile Inspection**: View contents of `.nvdaprofile` files in a tree view
 - **Profile Metadata**: Each backup includes username, PC name, and creation date
 

@@ -250,6 +250,27 @@ def start_nvda() -> bool:
         return False
 
 
+def wait_for_nvda_start(timeout: int = 20) -> bool:
+    """Wait until NVDA's main process is running after ``start_nvda``.
+
+    ``start_nvda`` returns as soon as the launch has been requested; NVDA needs a
+    moment to actually come up (and to initialise speech). Waiting here means a
+    message shown right after the restart is spoken again by the returning screen
+    reader instead of falling into silence.
+
+    Returns True once the main process is up (after a short settle), False on
+    timeout.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if get_nvda_process() is not None:
+            # Brief settle so speech is initialised before the caller speaks.
+            time.sleep(1.0)
+            return True
+        time.sleep(0.5)
+    return False
+
+
 def remove_tree(path: str) -> None:
     """Delete a directory tree, clearing read-only attributes as it goes.
 

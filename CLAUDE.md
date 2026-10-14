@@ -23,6 +23,10 @@ NVDA Profile Manager is a Python3 wxPython application that manages NVDA screen 
   (flushing settings) and clears any lingering `nvda_slave.exe` helper, which otherwise holds
   folder handles. Detection covers both processes and portable installs
   (`nvda_utils.get_running_nvda_processes`, `find_nvda_executable`).
+  When the app had to close NVDA it **starts it again automatically** once the operation is done
+  (`main.NVDAProfileManager._resume_nvda`, waiting via `nvda_utils.wait_for_nvda_start`), with no
+  "start NVDA?" prompt — so a blind user always ends up with their screen reader running and the
+  result message is spoken again. A user who had NVDA off is not affected.
 - **Profile Descriptor**: Each `.nvdaprofile` contains metadata (username, PC name, creation date)
 - **File Viewer**: Tree view to inspect contents of `.nvdaprofile` files before restoring
 

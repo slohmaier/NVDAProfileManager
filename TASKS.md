@@ -7,6 +7,9 @@
   - Gracefully quit NVDA (flush settings), clear lingering slaves
   - Retry the folder rename to ride out transient Windows locks
 - Keep rollback after restore; add File > Undo Last Restore
+- Restart NVDA automatically after backup/restore/undo (no popup), so a blind
+  user resumes with the screen reader running; wait for it to come up before the
+  result message so it is spoken again
 - Prune rollback folders to the newest 3 at startup
 - Exclude leftover `nvda.ini*.tmp` files from backups (`build_profile_archive`)
 - Fix NVDA not starting: use `os.startfile` (ShellExecute) because `nvda.exe`

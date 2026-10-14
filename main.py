@@ -22,6 +22,8 @@ class NVDAProfileManager(wx.Frame):
 
         self.current_profile_path = None
         self._temp_profile_path = None
+        # Set when we had to close a running NVDA, so the operation restarts it.
+        self._nvda_needs_restart = False
 
         appdata = os.getenv('APPDATA')
         self.nvda_path = os.path.join(appdata, 'nvda') if appdata else ''
@@ -269,6 +271,11 @@ class NVDAProfileManager(wx.Frame):
         a backup taken while it runs can be inconsistent and a restore will fail on
         the locked folder. If NVDA is running, offer to close it; return False if it
         could not be closed so the caller blocks the operation.
+
+        When NVDA is closed here the flag ``_nvda_needs_restart`` is set so the
+        caller can bring it back afterwards via ``_resume_nvda`` — a blind user
+        must end up with their screen reader running again, without having to
+        start it manually.
         """
         if not nvda_utils.is_nvda_running():
             return True
@@ -278,6 +285,8 @@ class NVDAProfileManager(wx.Frame):
             'NVDA is currently running and must be closed first.\n\n'
             'Its settings are saved on exit, so closing it also ensures your '
             'configuration is consistent.\n\n'
+            'NVDA will be started again automatically once the operation is '
+            'done.\n\n'
             'Close NVDA now?',
             'NVDA Running',
             wx.YES_NO | wx.ICON_WARNING
@@ -301,7 +310,32 @@ class NVDAProfileManager(wx.Frame):
             )
             return False
 
+        self._nvda_needs_restart = True
         return True
+
+    def _resume_nvda(self):
+        """Start NVDA again after an operation that had to close it.
+
+        Only acts when NVDA was running when we closed it, so a user who keeps
+        NVDA off is not surprised by it coming up. Restarting is silent (no
+        prompt) and we wait until NVDA's process is up before returning, so the
+        result message the caller shows next is spoken by the restarted screen
+        reader instead of falling into silence.
+        """
+        if not self._nvda_needs_restart:
+            return
+        self._nvda_needs_restart = False
+
+        self.SetStatusText('Starting NVDA...')
+        if nvda_utils.start_nvda():
+            nvda_utils.wait_for_nvda_start()
+            self.SetStatusText('NVDA started')
+        else:
+            wx.MessageBox(
+                'Could not start NVDA. Please start it manually.',
+                'Warning',
+                wx.OK | wx.ICON_WARNING
+            )
 
     def _update_undo_state(self):
         """Enable the Undo Last Restore item only when a rollback exists."""
@@ -334,35 +368,30 @@ class NVDAProfileManager(wx.Frame):
         if dlg.ShowModal() == wx.ID_YES:
             try:
                 self.restore_profile(self.current_profile_path)
-                self.SetStatusText('Profile restored successfully')
                 self._update_undo_state()
 
-                # Ask if user wants to restart NVDA
-                restart_dlg = wx.MessageDialog(
-                    self,
+                # Bring NVDA back automatically (it was closed above) before the
+                # confirmation is shown, so it is spoken again — no "start NVDA?"
+                # prompt for the user to answer.
+                self._resume_nvda()
+
+                self.SetStatusText('Profile restored successfully')
+                wx.MessageBox(
                     'Profile restored successfully!\n\n'
                     'Your previous configuration was kept and can be brought back '
-                    'via File > Undo Last Restore.\n\n'
-                    'Would you like to start NVDA now?',
-                    'Restore Complete',
-                    wx.YES_NO | wx.ICON_QUESTION
-                )
-                if restart_dlg.ShowModal() == wx.ID_YES:
-                    if nvda_utils.start_nvda():
-                        self.SetStatusText('Profile restored - NVDA started')
-                    else:
-                        wx.MessageBox(
-                            'Could not start NVDA. Please start it manually.',
-                            'Warning',
-                            wx.OK | wx.ICON_WARNING
-                        )
-                restart_dlg.Destroy()
+                    'via File > Undo Last Restore.',
+                    'Restore Complete', wx.OK | wx.ICON_INFORMATION)
 
             except Exception as e:
+                self._resume_nvda()
                 wx.MessageBox(
                     f'Error restoring profile:\n{str(e)}\n\n'
                     'Your existing NVDA configuration was left unchanged.',
                     'Error', wx.OK | wx.ICON_ERROR)
+
+        else:
+            # Declined after NVDA was already closed above — bring it back.
+            self._resume_nvda()
 
         dlg.Destroy()
 
@@ -386,6 +415,8 @@ class NVDAProfileManager(wx.Frame):
             'Undo Last Restore',
             wx.YES_NO | wx.NO_DEFAULT | wx.ICON_WARNING)
         if dlg.ShowModal() != wx.ID_YES:
+            # Declined after NVDA was already closed above — bring it back.
+            self._resume_nvda()
             dlg.Destroy()
             return
         dlg.Destroy()
@@ -393,12 +424,14 @@ class NVDAProfileManager(wx.Frame):
         try:
             self.SetStatusText('Undoing last restore...')
             nvda_utils.undo_restore(self.nvda_path)
-            self.SetStatusText('Previous configuration restored')
             self._update_undo_state()
+            self._resume_nvda()
+            self.SetStatusText('Previous configuration restored')
             wx.MessageBox(
                 'Your previous NVDA configuration has been restored.',
                 'Undo Restore Complete', wx.OK | wx.ICON_INFORMATION)
         except Exception as e:
+            self._resume_nvda()
             wx.MessageBox(
                 f'Error undoing restore:\n{str(e)}\n\n'
                 'Your current configuration was left unchanged.',
@@ -531,10 +564,14 @@ class NVDAProfileManager(wx.Frame):
         try:
             nvda_utils.build_profile_archive(self.nvda_path, output_path, descriptor)
         except Exception as e:
+            self._resume_nvda()
             wx.MessageBox(f'Error creating backup: {str(e)}', 'Error', wx.OK | wx.ICON_ERROR)
             self.SetStatusText('Error creating backup')
             return False
 
+        # Bring NVDA back before the caller shows its result message, so a blind
+        # user has speech again and hears the confirmation.
+        self._resume_nvda()
         return True
 
     def restore_profile(self, profile_path):
