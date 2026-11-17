@@ -44,7 +44,7 @@ INSTALLER_OUTPUT_DIR = os.path.join('installer', 'output')
 # otpauthuri.txt) -- none of which lives in this repository. Only the *location*
 # is configured, via a local, git-ignored ssign.conf (see ssign.conf.example).
 SIGN_CONF = 'ssign.conf'
-DEFAULT_SIGN_DIR = (r'C:\Users\stefa\ownCloud\Personal\slohmaier.com'
+DEFAULT_SIGN_DIR = (r'C:\Users\stefa\ownCloud\Shares\slohmaier.com'
                     r'\code-signing\certum-codesigning')
 
 

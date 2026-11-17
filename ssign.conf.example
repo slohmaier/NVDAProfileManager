@@ -10,7 +10,7 @@
 # seed.enc via CERTUM_OTP_KEY, or otpauthuri.txt) - all outside this repository.
 
 # Directory that contains sign-products.ps1 (and ssign.exe).
-sign_dir = C:\path\to\ownCloud\Personal\slohmaier.com\code-signing\certum-codesigning
+sign_dir = C:\path\to\ownCloud\Shares\slohmaier.com\code-signing\certum-codesigning
 
 # The signing script inside sign_dir.
 sign_script = sign-products.ps1

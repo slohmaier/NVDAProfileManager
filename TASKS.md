@@ -2,6 +2,11 @@
 
 ## Done
 
+- ownCloud folder rename (2026-11-17): the code-signing share is now
+  `~/ownCloud/Shares/slohmaier.com/code-signing/certum-codesigning`
+  (was `Persönlich`). `SConstruct` (`DEFAULT_SIGN_DIR`) and
+  `ssign.conf.example` updated.
+
 - Robust NVDA handling on backup/restore:
   - Detect `nvda.exe` and `nvda_slave.exe`, resolve portable installs
   - Gracefully quit NVDA (flush settings), clear lingering slaves
