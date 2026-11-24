@@ -58,6 +58,7 @@ python -m unittest discover -s tests
 **Build, installer, signing** (all via SCons):
 ```powershell
 scons build       # dist\NVDAProfileManager.exe (+ refreshes the dev Start Menu entry)
+scons cli         # dist\NVDAProfileManagerCLI.exe (console, same operations headless)
 scons installer   # signs the exe, compiles + signs the Inno Setup installer
 scons sign        # sign the existing exe and installer in place
 scons shortcut    # (re)create the dev Start Menu shortcut only

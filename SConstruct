@@ -301,6 +301,28 @@ def build_exe(target, source, env):
     return None
 
 
+def build_cli(target, source, env):
+    """Build the console executable for the CLI using PyInstaller."""
+    script_dir = Dir('.').abspath
+    icon_path = os.path.join(script_dir, ICON_FILE)
+    cli_path = os.path.join(script_dir, 'cli.py')
+    cmd = [
+        sys.executable, '-m', 'PyInstaller',
+        '--onefile',
+        '--console',
+        f'--icon={icon_path}',
+        '--name=NVDAProfileManagerCLI',
+        '--clean',
+        '--noconfirm',
+        cli_path
+    ]
+    result = subprocess.run(cmd, shell=False, cwd=script_dir)
+    if result.returncode != 0:
+        return 1
+    print(f"Built {DIST_DIR}/NVDAProfileManagerCLI.exe")
+    return None
+
+
 def run_app(target, source, env):
     """Run the application."""
     subprocess.Popen([sys.executable, MAIN_SCRIPT], shell=False)
@@ -334,6 +356,9 @@ env.Append(BUILDERS={'ShortcutBuilder': shortcut_builder})
 # Define targets
 icon_target = env.IconBuilder(ICON_FILE, MAIN_SCRIPT)
 exe_target = env.ExeBuilder(f'{DIST_DIR}/{EXE_NAME}.exe', [MAIN_SCRIPT, 'nvda_utils.py', ICON_FILE])
+cli_builder = Builder(action=build_cli)
+env.Append(BUILDERS={'CliBuilder': cli_builder})
+cli_target = env.CliBuilder(f'{DIST_DIR}/NVDAProfileManagerCLI.exe', ['cli.py', 'nvda_utils.py', ICON_FILE])
 run_target = env.RunBuilder('run_marker', MAIN_SCRIPT)
 
 VERSION = read_version()
@@ -349,6 +374,7 @@ env.Depends(exe_target, icon_target)
 # Aliases
 env.Alias('icon', icon_target)
 env.Alias('build', exe_target)
+env.Alias('cli', cli_target)
 env.Alias('run', run_target)
 env.Alias('installer', installer_target)
 env.Alias('sign', sign_target)

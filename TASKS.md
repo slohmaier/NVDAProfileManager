@@ -23,6 +23,10 @@
 - Live end-to-end test on this machine (stop / restore / undo / start): passed
 - Inno Setup installer (`installer/NVDAProfileManager.iss`)
 - SCons targets `installer` and `sign`; signing via shared `sign-products.ps1`
+- Headless CLI (`cli.py`): `create`, `inspect`, `restore`, `undo`,
+  `list-restores`; reuses `nvda_utils`, closes/restarts NVDA, `--yes` for
+  destructive steps; sandboxed tests in `tests/test_cli.py`
+- `scons cli` builds `dist\NVDAProfileManagerCLI.exe` (console)
 - Signing config template `ssign.conf.example` (real `ssign.conf` git-ignored);
   no Certum/ssign material in the repo
 - Dev Start Menu entry: `tools/install-dev-shortcut.ps1` + `scons shortcut`,
@@ -31,6 +35,9 @@
 
 ## Open
 
+- Rollout of the NVDA touch profile to a second touch device, using
+  `CLI create`/`restore` and the documentation in
+  `C:\Users\stefa\ownCloud\Personal\AppData\NVDATouch`.
 - GUI accessibility pass for the new Undo menu item and dialogs (keyboard only)
 - Consider a "discard rollback" action to free disk sooner
 - Manual test matrix on a second machine (portable NVDA, different user)

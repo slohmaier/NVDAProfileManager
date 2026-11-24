@@ -20,6 +20,29 @@ failure leaves your current configuration untouched. The replaced configuration 
 rollback folder, so you can revert with **File > Undo Last Restore**. The newest three rollback
 folders are retained.
 
+## Command line
+
+A separate console executable, `NVDAProfileManagerCLI.exe`, performs the same
+archive and restore operations without the GUI, for scripted rollouts:
+
+```
+NVDAProfileManagerCLI.exe create touch.nvdaprofile --note "Touch setup" --yes
+NVDAProfileManagerCLI.exe inspect touch.nvdaprofile --json
+NVDAProfileManagerCLI.exe restore touch.nvdaprofile --yes
+NVDAProfileManagerCLI.exe undo --yes
+NVDAProfileManagerCLI.exe list-restores
+```
+
+`--yes` is required whenever NVDA has to be closed or the configuration is
+replaced; the CLI restarts NVDA afterwards unless `--no-restart` is given.
+`--nvda-dir` points at a different configuration folder, for testing or for
+portable installations.
+
+The touch setup documentation and the generated profile live outside this
+repository, in `C:\Users\stefa\ownCloud\Personal\AppData\NVDATouch`.
+
+Build it with `scons cli`, which produces `dist\NVDAProfileManagerCLI.exe`.
+
 ## Requirements
 
 - Python 3.x
