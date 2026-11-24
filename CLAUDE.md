@@ -6,6 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 NVDA Profile Manager is a Python3 wxPython application that manages NVDA screen reader profiles. It allows users to backup and restore their NVDA configuration from `C:\Users\<username>\AppData\Roaming\nvda`.
 
+The deployable touch profile and its documentation are kept outside this
+repository in `C:\Users\stefa\ownCloud\Personal\AppData\NVDATouch`; update that
+folder when a change affects the touch setup, then commit here.
+
 ## Core Functionality
 
 - **Backup**: Creates `.nvdaprofile` files (ZIP archives) containing all NVDA configuration files and
